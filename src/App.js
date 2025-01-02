@@ -1,28 +1,32 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import axios from "axios";
+import "./App.css"; // Import the CSS file
 
 const App = () => {
-  const [selectedTicker, setSelectedTicker] = useState("AAPL");
+  const [selectedTicker, setSelectedTicker] = useState("");
   const [stockData, setStockData] = useState(null);
-  // const [intrinsicValue, setIntrinsicValue] = useState(null);
   const [intrinsicValues, setIntrinsicValues] = useState({
     peMethod: null,
     dcf: null,
     graham: null,
     nav: null,
   });
+  const [parameters, setParameters] = useState({
+    growthRate: 10,
+    discountRate: 10,
+    terminalGrowthRate: 2,
+  });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const tickers = ["AAPL", "GOOGL", "MSFT", "AMZN", "TSLA"]; // Example tickers
-
+  const tickers = ["AAPL", "GOOGL", "MSFT", "AMZN", "TSLA"];
   const apiKey = process.env.REACT_APP_RAPIDAPI_KEY;
-  
+
+  // Fetch stock data
   const fetchStockData = async (ticker) => {
     setLoading(true);
     setError("");
     setStockData(null);
-    // setIntrinsicValue(null);
     setIntrinsicValues({
       peMethod: null,
       dcf: null,
@@ -32,120 +36,165 @@ const App = () => {
 
     try {
       const response = await axios.get(
-        `https://yahoo-finance15.p.rapidapi.com/api/v1/markets/stock/quotes?`,
+        `https://yahoo-finance15.p.rapidapi.com/api/v1/markets/stock/quotes`,
         {
-          params: { ticker: ticker},
+          params: { ticker },
           headers: {
-            "X-RapidAPI-Key": apiKey, // Replace with your key
+            "X-RapidAPI-Key": apiKey,
             "X-RapidAPI-Host": "yahoo-finance15.p.rapidapi.com",
           },
         }
       );
 
-      const data = response.data;
-      console.log(data);
-      // const earnings = data.earnings?.financialsChart?.yearly[0];
-      // const currentPrice = data.price?.regularMarketPrice?.raw;
-
       const stock = response.data.body[0];
+      const { epsTrailingTwelveMonths: eps, trailingPE, sharesOutstanding } = stock;
       const price = stock.regularMarketPrice;
-      // const eps = stock.epsTrailingTwelveMonths;
-      const peRatio = stock.trailingPE;
 
-      //to be improved
-      const eps = stock.epsTrailingTwelveMonths;
-      //make it adjustable 
-      const growthRate = 10; // Example growth rate for Graham Formula (adjustable)
-      const discountRate = 0.10; // Example discount rate for DCF (10%)
-      const futureCashFlows = [10, 12, 14, 16, 18]; // Example projected FCF
-      const terminalValueGrowth = 0.02; // Example terminal growth rate
-
-      const totalAssets = 5000000000; // Replace 
-      const totalLiabilities = 2000000000; // Replace
-      const sharesOutstanding = stock.sharesOutstanding;
-
-      // Calculate intrinsic value assuming a fixed P/E multiplier (e.g., 15)
-      // const intrinsicValue = eps * 15;
-      
-      // P/E Method
-      const peMethod = eps * 15; // Assume P/E ratio of 15
-
-      // DCF Calculation
-      const terminalValue = (futureCashFlows[futureCashFlows.length - 1] * (1 + terminalValueGrowth)) /(discountRate - terminalValueGrowth);
-      const dcfValue = futureCashFlows.reduce((acc, fcf, i) => acc + fcf / Math.pow(1 + discountRate, i + 1), 0) + terminalValue / Math.pow(1 + discountRate, futureCashFlows.length);
-
-      // Benjamin Graham's Formula
-      const grahamValue = eps * (8.5 + 2 * growthRate);
-
-      // Net Asset Value (NAV)
-      const nav = (totalAssets - totalLiabilities) / sharesOutstanding;
       setStockData({
-        price,
         eps,
-        peRatio,
-        forwardPE: stock.forwardPE,
-        marketCap: stock.marketCap,
-        dividendYield: stock.dividendYield,
+        price,
+        trailingPE,
+        sharesOutstanding,
       });
-      // setIntrinsicValue(intrinsicValue.toFixed(2));
-      setIntrinsicValues({
-        peMethod,
-        dcf: dcfValue.toFixed(2),
-        graham: grahamValue.toFixed(2),
-        nav: nav.toFixed(2),
-      });
-      
     } catch (err) {
-      setError("Error fetching stock data. Please try again.");
+      setError("Failed to fetch stock data. Please try again.");
     } finally {
       setLoading(false);
     }
   };
 
+  const calculateIntrinsicValues = () => {
+    if (!stockData) return;
+
+    const { eps, sharesOutstanding } = stockData;
+    const { growthRate, discountRate, terminalGrowthRate } = parameters;
+
+    const futureCashFlows = [10, 12, 14, 16, 18];
+    const terminalValue = (futureCashFlows[futureCashFlows.length - 1] * (1 + terminalGrowthRate / 100)) /
+      (discountRate / 100 - terminalGrowthRate / 100);
+    const dcfValue = futureCashFlows.reduce(
+      (acc, fcf, i) => acc + fcf / Math.pow(1 + discountRate / 100, i + 1),
+      0
+    ) + terminalValue / Math.pow(1 + discountRate / 100, futureCashFlows.length);
+
+    const grahamValue = eps * (8.5 + 2 * growthRate);
+    const nav = (5000000000 - 2000000000) / sharesOutstanding;
+    const peMethod = eps * 15;
+
+    setIntrinsicValues({
+      peMethod: peMethod.toFixed(2),
+      dcf: dcfValue.toFixed(2),
+      graham: grahamValue.toFixed(2),
+      nav: nav.toFixed(2),
+    });
+  };
+
+  useEffect(() => {
+    calculateIntrinsicValues();
+  }, [parameters, stockData]);
+
+  const handleParameterChange = (e) => {
+    const { name, value } = e.target;
+    setParameters((prev) => ({ ...prev, [name]: parseFloat(value) || 0 }));
+  };
+
   const handleTickerChange = (e) => {
-    const ticker = e.target.value;
-    setSelectedTicker(ticker);
-    fetchStockData(ticker);
+    setSelectedTicker(e.target.value);
+  };
+
+  const handleFetchData = () => {
+    if (selectedTicker.trim() !== "") {
+      fetchStockData(selectedTicker.trim().toUpperCase());
+    }
   };
 
   return (
-    <div style={{ padding: "20px", fontFamily: "Arial" }}>
-      <h1>Stock Intrinsic Value Calculator</h1>
-      <label htmlFor="ticker">Select a stock:</label>
-      <select
-        id="ticker"
-        value={selectedTicker}
-        onChange={handleTickerChange}
-        style={{ margin: "10px", padding: "5px" }}
-      >
-        {tickers.map((ticker) => (
-          <option key={ticker} value={ticker}>
-            {ticker}
-          </option>
-        ))}
-      </select>
+    <div className="container">
+      <h1 className="header">Stock Intrinsic Value Calculator</h1>
+      <label>
+        Select or enter a stock ticker:
+        <div style={{ display: "flex", gap: "10px", alignItems: "center", marginTop: "10px" }}>
+          <select
+            value={selectedTicker}
+            onChange={handleTickerChange}
+            className="select"
+          >
+            <option value="" disabled>
+              Select a stock
+            </option>
+            {tickers.map((ticker) => (
+              <option key={ticker} value={ticker}>
+                {ticker}
+              </option>
+            ))}
+          </select>
+          <input
+            type="text"
+            placeholder="Or type ticker here"
+            value={selectedTicker}
+            onChange={(e) => setSelectedTicker(e.target.value)}
+            className="input"
+          />
+          <button onClick={handleFetchData} className="button">
+            Fetch Data
+          </button>
+        </div>
+      </label>
+
+      <div className="parameters">
+        <div className="input-group">
+          <label>Growth Rate (%):</label>
+          <input
+            type="number"
+            name="growthRate"
+            value={parameters.growthRate}
+            onChange={handleParameterChange}
+            className="input"
+          />
+        </div>
+        <div className="input-group">
+          <label>Discount Rate (%):</label>
+          <input
+            type="number"
+            name="discountRate"
+            value={parameters.discountRate}
+            onChange={handleParameterChange}
+            className="input"
+          />
+        </div>
+        <div className="input-group">
+          <label>Terminal Growth Rate (%):</label>
+          <input
+            type="number"
+            name="terminalGrowthRate"
+            value={parameters.terminalGrowthRate}
+            onChange={handleParameterChange}
+            className="input"
+          />
+        </div>
+      </div>
+
       {loading && <p>Loading...</p>}
-      {error && <p style={{ color: "red" }}>{error}</p>}
+      {error && <p className="error">{error}</p>}
+
       {stockData && (
-        <div>
-          <p>Current Price: ${stockData.price}</p>
-          <p>EPS (TTM): ${stockData.eps}</p>
-          <p>Trailing P/E: {stockData.peRatio}</p>
-          <p>Forward P/E: {stockData.forwardPE}</p>
-          <p>Market Cap: ${Intl.NumberFormat().format(stockData.marketCap)}</p>
-          <p>Dividend Yield: {stockData.dividendYield}%</p>
-          
+        <div className="data-section">
+          <h3>Stock Details</h3>
+          <p>Price: ${stockData.price}</p>
+          <p>EPS: ${stockData.eps}</p>
+          <p>Trailing P/E: {stockData.trailingPE}</p>
         </div>
       )}
-      {stockData && intrinsicValues && (
-      <div>
-        <h3>Intrinsic Value Calculations</h3>
-        <p>P/E Method: ${intrinsicValues.peMethod}</p>
-        <p>Discounted Cash Flow (DCF): ${intrinsicValues.dcf}</p>
-        <p>Benjamin Graham Formula: ${intrinsicValues.graham}</p>
-        <p>Net Asset Value (NAV): ${intrinsicValues.nav}</p>
-      </div>
-)}
+
+      {intrinsicValues && (
+        <div className="intrinsic-values">
+          <h3>Intrinsic Value Calculations</h3>
+          <p>P/E Method: ${intrinsicValues.peMethod}</p>
+          <p>DCF: ${intrinsicValues.dcf}</p>
+          <p>Benjamin Graham Formula: ${intrinsicValues.graham}</p>
+          <p>NAV: ${intrinsicValues.nav}</p>
+        </div>
+      )}
     </div>
   );
 };
